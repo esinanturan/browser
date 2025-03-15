@@ -44,7 +44,7 @@ help:
 
 # $(ZIG) commands
 # ------------
-.PHONY: build build-dev run run-release shell test bench download-zig wpt unittest
+.PHONY: build build-dev run run-release shell test bench download-zig wpt unittest data
 
 zig_version = $(shell grep 'recommended_zig_version = "' "vendor/zig-js-runtime/build.zig" | cut -d'"' -f2)
 
@@ -59,13 +59,13 @@ download-zig:
 ## Build in release-safe mode
 build:
 	@printf "\e[36mBuilding (release safe)...\e[0m\n"
-	@$(ZIG) build -Doptimize=ReleaseSafe -Dengine=v8 || (printf "\e[33mBuild ERROR\e[0m\n"; exit 1;)
+	$(ZIG) build -Doptimize=ReleaseSafe -Dengine=v8 -Dgit_commit=$$(git rev-parse --short HEAD) || (printf "\e[33mBuild ERROR\e[0m\n"; exit 1;)
 	@printf "\e[33mBuild OK\e[0m\n"
 
 ## Build in debug mode
 build-dev:
 	@printf "\e[36mBuilding (debug)...\e[0m\n"
-	@$(ZIG) build -Dengine=v8 || (printf "\e[33mBuild ERROR\e[0m\n"; exit 1;)
+	@$(ZIG) build -Dengine=v8 -Dgit_commit=$$(git rev-parse --short HEAD) || (printf "\e[33mBuild ERROR\e[0m\n"; exit 1;)
 	@printf "\e[33mBuild OK\e[0m\n"
 
 ## Run the server in debug mode
@@ -198,6 +198,9 @@ install-zig-js-runtime-dev:
 install-zig-js-runtime:
 	@cd vendor/zig-js-runtime && \
 	make install
+
+data:
+	cd src/data && go run public_suffix_list_gen.go > public_suffix_list.zig
 
 .PHONY: _build_mimalloc
 
