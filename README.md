@@ -25,8 +25,6 @@ Fast web automation for AI agents, LLM training, scraping and testing:
 - Ultra-low memory footprint (9x less than Chrome)
 - Exceptionally fast execution (11x faster than Chrome)
 - Instant startup
-<br />
-<br />
 
 [<img width="350px" src="https://cdn.lightpanda.io/assets/images/github/execution-time.svg">
 ](https://github.com/lightpanda-io/demo)
@@ -113,6 +111,9 @@ await context.close();
 await browser.disconnect();
 ```
 
+### Telemetry
+By default, Lightpanda collects and sends usage telemetry. This can be disabled by setting an environment variable `LIGHTPANDA_DISABLE_TELEMETRY=true`. You can read Lightpanda's privacy policy at: [https://lightpanda.io/privacy-policy](https://lightpanda.io/privacy-policy).
+
 ## Status
 
 Lightpanda is still a work in progress and is currently at a Beta stage.
@@ -139,7 +140,7 @@ You can also follow the progress of our Javascript support in our dedicated [zig
 
 ### Prerequisites
 
-Lightpanda is written with [Zig](https://ziglang.org/) `0.13.0`. You have to
+Lightpanda is written with [Zig](https://ziglang.org/) `0.14.0`. You have to
 install it with the right version in order to build the project.
 
 Lightpanda also depends on

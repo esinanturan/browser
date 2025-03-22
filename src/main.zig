@@ -31,10 +31,11 @@ const apiweb = @import("apiweb.zig");
 pub const Types = jsruntime.reflect(apiweb.Interfaces);
 pub const UserContext = apiweb.UserContext;
 pub const IO = @import("asyncio").Wrapper(jsruntime.Loop);
+const version = @import("build_info").git_commit;
 
 const log = std.log.scoped(.cli);
 
-pub const std_options = .{
+pub const std_options = std.Options{
     // Set the log level to info
     .log_level = .debug,
 
@@ -59,17 +60,22 @@ pub fn main() !void {
 
     switch (args.mode) {
         .help => args.printUsageAndExit(args.mode.help),
+        .version => {
+            std.debug.print("{s}\n", .{version});
+            return std.process.cleanExit();
+        },
         .serve => |opts| {
             const address = std.net.Address.parseIp4(opts.host, opts.port) catch |err| {
                 log.err("address (host:port) {any}\n", .{err});
                 return args.printUsageAndExit(false);
             };
 
-            var loop = try jsruntime.Loop.init(alloc);
-            defer loop.deinit();
+            var app = try @import("app.zig").App.init(alloc, .serve);
+            defer app.deinit();
+            app.telemetry.record(.{ .run = {} });
 
             const timeout = std.time.ns_per_s * @as(u64, opts.timeout);
-            server.run(alloc, address, timeout, &loop) catch |err| {
+            server.run(app, address, timeout) catch |err| {
                 log.err("Server error", .{});
                 return err;
             };
@@ -77,24 +83,22 @@ pub fn main() !void {
         .fetch => |opts| {
             log.debug("Fetch mode: url {s}, dump {any}", .{ opts.url, opts.dump });
 
+            var app = try @import("app.zig").App.init(alloc, .fetch);
+            defer app.deinit();
+            app.telemetry.record(.{ .run = {} });
+
             // vm
             const vm = jsruntime.VM.init();
             defer vm.deinit();
 
-            // loop
-            var loop = try jsruntime.Loop.init(alloc);
-            defer loop.deinit();
-
             // browser
-            var browser = Browser.init(alloc, &loop);
+            var browser = Browser.init(app);
             defer browser.deinit();
 
             var session = try browser.newSession({});
 
             // page
-            const page = try session.createPage();
-            try page.start(null);
-            defer page.end();
+            const page = try session.createPage(null);
 
             _ = page.navigate(opts.url, null) catch |err| switch (err) {
                 error.UnsupportedUriScheme, error.UriMissingHost => {
@@ -125,18 +129,20 @@ const Command = struct {
         help,
         fetch,
         serve,
+        version,
     };
 
     const Mode = union(ModeType) {
         help: bool, // false when being printed because of an error
         fetch: Fetch,
         serve: Serve,
+        version: void,
     };
 
     const Serve = struct {
         host: []const u8,
         port: u16,
-        timeout: u8,
+        timeout: u16,
     };
 
     const Fetch = struct {
@@ -172,10 +178,13 @@ const Command = struct {
             \\--timeout       Inactivity timeout in seconds before disconnecting clients
             \\                Defaults to 3 (seconds)
             \\
+            \\version command
+            \\Displays the version of {s}
+            \\
             \\help command
             \\Displays this message
         ;
-        std.debug.print(usage, .{ self.exec_name, self.exec_name, self.exec_name });
+        std.debug.print(usage, .{ self.exec_name, self.exec_name, self.exec_name, self.exec_name });
         if (success) {
             return std.process.cleanExit();
         }
@@ -210,9 +219,10 @@ fn parseArgs(allocator: Allocator) !Command {
     };
 
     cmd.mode = switch (mode) {
-        .help => Command.Mode{ .help = true },
-        .serve => Command.Mode{ .serve = parseServeArgs(allocator, &args) catch return cmd },
-        .fetch => Command.Mode{ .fetch = parseFetchArgs(allocator, &args) catch return cmd },
+        .help => .{ .help = true },
+        .serve => .{ .serve = parseServeArgs(allocator, &args) catch return cmd },
+        .fetch => .{ .fetch = parseFetchArgs(allocator, &args) catch return cmd },
+        .version => .{ .version = {} },
     };
     return cmd;
 }
@@ -249,7 +259,7 @@ fn parseServeArgs(
 ) !Command.Serve {
     var host: []const u8 = "127.0.0.1";
     var port: u16 = 9222;
-    var timeout: u8 = 3;
+    var timeout: u16 = 3;
 
     while (args.next()) |opt| {
         if (std.mem.eql(u8, "--host", opt)) {
@@ -280,7 +290,7 @@ fn parseServeArgs(
                 return error.MissingTimeout;
             };
 
-            timeout = std.fmt.parseInt(u8, str, 10) catch |err| {
+            timeout = std.fmt.parseInt(u16, str, 10) catch |err| {
                 log.err("--timeout value is invalid: {}", .{err});
                 return error.InvalidTimeout;
             };
@@ -334,7 +344,7 @@ fn parseFetchArgs(
 var verbose: bool = builtin.mode == .Debug; // In debug mode, force verbose.
 fn logFn(
     comptime level: std.log.Level,
-    comptime scope: @Type(.EnumLiteral),
+    comptime scope: @Type(.enum_literal),
     comptime format: []const u8,
     args: anytype,
 ) void {

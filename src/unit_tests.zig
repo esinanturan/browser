@@ -22,10 +22,10 @@ const parser = @import("netsurf");
 
 const Allocator = std.mem.Allocator;
 
+const App = @import("app.zig").App;
 const jsruntime = @import("jsruntime");
 pub const Types = jsruntime.reflect(@import("generate.zig").Tuple(.{}){});
 pub const UserContext = @import("user_context.zig").UserContext;
-// pub const IO = @import("asyncio").Wrapper(jsruntime.Loop);
 
 pub const std_options = std.Options{
     .log_level = .err,
@@ -44,8 +44,8 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
 
-    var loop = try jsruntime.Loop.init(allocator);
-    defer loop.deinit();
+    var app = try App.init(allocator, .serve);
+    defer app.deinit();
 
     const env = Env.init(allocator);
     defer env.deinit(allocator);
@@ -67,7 +67,10 @@ pub fn main() !void {
 
     const cdp_thread = blk: {
         const address = try std.net.Address.parseIp("127.0.0.1", 9583);
-        const thread = try std.Thread.spawn(.{}, serveCDP, .{ allocator, address, &loop });
+        const thread = try std.Thread.spawn(.{}, serveCDP, .{
+            app,
+            address,
+        });
         break :blk thread;
     };
     defer cdp_thread.join();
@@ -349,9 +352,9 @@ fn serveHTTP(address: std.net.Address) !void {
     }
 }
 
-fn serveCDP(allocator: Allocator, address: std.net.Address, loop: *jsruntime.Loop) !void {
+fn serveCDP(app: *App, address: std.net.Address) !void {
     const server = @import("server.zig");
-    server.run(allocator, address, std.time.ns_per_s * 2, loop) catch |err| {
+    server.run(app, address, std.time.ns_per_s * 2) catch |err| {
         std.debug.print("CDP server error: {}", .{err});
         return err;
     };
@@ -378,8 +381,11 @@ test {
     std.testing.refAllDecls(@import("generate.zig"));
     std.testing.refAllDecls(@import("http/Client.zig"));
     std.testing.refAllDecls(@import("storage/storage.zig"));
+    std.testing.refAllDecls(@import("storage/cookie.zig"));
     std.testing.refAllDecls(@import("iterator/iterator.zig"));
     std.testing.refAllDecls(@import("server.zig"));
     std.testing.refAllDecls(@import("cdp/cdp.zig"));
     std.testing.refAllDecls(@import("log.zig"));
+    std.testing.refAllDecls(@import("datetime.zig"));
+    std.testing.refAllDecls(@import("telemetry/telemetry.zig"));
 }
