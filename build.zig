@@ -58,6 +58,15 @@ pub fn build(b: *std.Build) !void {
         .optimize = mode,
     });
     try common(b, exe, options);
+    {
+        var opt = b.addOptions();
+        opt.addOption(
+            []const u8,
+            "git_commit",
+            b.option([]const u8, "git_commit", "Current git commit") orelse "dev",
+        );
+        exe.root_module.addImport("build_info", opt.createModule());
+    }
     b.installArtifact(exe);
 
     // run
@@ -99,7 +108,7 @@ pub fn build(b: *std.Build) !void {
     // compile
     const tests = b.addTest(.{
         .root_source_file = b.path("src/main_tests.zig"),
-        .test_runner = b.path("src/main_tests.zig"),
+        .test_runner = .{ .path = b.path("src/main_tests.zig"), .mode = .simple },
         .target = target,
         .optimize = mode,
     });
@@ -124,8 +133,8 @@ pub fn build(b: *std.Build) !void {
 
     // compile
     const unit_tests = b.addTest(.{
-        .root_source_file = b.path("src/unit_tests.zig"),
-        .test_runner = b.path("src/unit_tests.zig"),
+        .root_source_file = b.path("src/main_unit_tests.zig"),
+        .test_runner = .{ .path = b.path("src/test_runner.zig"), .mode = .simple },
         .target = target,
         .optimize = mode,
     });
@@ -168,6 +177,9 @@ fn common(
     options: jsruntime.Options,
 ) !void {
     const target = step.root_module.resolved_target.?;
+    const optimize = step.root_module.optimize.?;
+    const dep_opts = .{ .target = target, .optimize = optimize };
+
     const jsruntimemod = try jsruntime_pkgs.module(
         b,
         options,
@@ -180,15 +192,7 @@ fn common(
     netsurf.addImport("jsruntime", jsruntimemod);
     step.root_module.addImport("netsurf", netsurf);
 
-    const asyncio = b.addModule("asyncio", .{
-        .root_source_file = b.path("vendor/zig-async-io/src/lib.zig"),
-    });
-    step.root_module.addImport("asyncio", asyncio);
-
-    const tlsmod = b.addModule("tls", .{
-        .root_source_file = b.path("vendor/tls.zig/src/main.zig"),
-    });
-    step.root_module.addImport("tls", tlsmod);
+    step.root_module.addImport("tls", b.dependency("tls", dep_opts).module("tls"));
 }
 
 fn moduleNetSurf(b: *std.Build, target: std.Build.ResolvedTarget) !*std.Build.Module {

@@ -16,6 +16,7 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+const builtin = @import("builtin");
 const std = @import("std");
 const cdp = @import("cdp.zig");
 
@@ -27,7 +28,7 @@ pub fn processMessage(cmd: anytype) !void {
         addBinding,
         callFunctionOn,
         releaseObject,
-    }, cmd.action) orelse return error.UnknownMethod;
+    }, cmd.input.action) orelse return error.UnknownMethod;
 
     switch (action) {
         .runIfWaitingForDebugger => return cmd.sendResult(null, .{}),
@@ -37,32 +38,17 @@ pub fn processMessage(cmd: anytype) !void {
 
 fn sendInspector(cmd: anytype, action: anytype) !void {
     // save script in file at debug mode
-    if (std.log.defaultLogEnabled(.debug)) {
+    if (builtin.mode == .Debug) {
         try logInspector(cmd, action);
     }
 
-    if (cmd.session_id) |s| {
-        cmd.cdp.session_id = try cdp.SessionID.parse(s);
-    }
+    const bc = cmd.browser_context orelse return error.BrowserContextNotLoaded;
 
-    // remove awaitPromise true params
-    // TODO: delete when Promise are correctly handled by zig-js-runtime
-    if (action == .callFunctionOn or action == .evaluate) {
-        const json = cmd.json;
-        if (std.mem.indexOf(u8, json, "\"awaitPromise\":true")) |_| {
-            // +1 because we'll be turning a true -> false
-            const buf = try cmd.arena.alloc(u8, json.len + 1);
-            _ = std.mem.replace(u8, json, "\"awaitPromise\":true", "\"awaitPromise\":false", buf);
-            cmd.session.callInspector(buf);
-            return;
-        }
-    }
+    // the result to return is handled directly by the inspector.
+    bc.session.callInspector(cmd.input.json);
 
-    cmd.session.callInspector(cmd.json);
-
-    if (cmd.id != null) {
-        return cmd.sendResult(null, .{});
-    }
+    // force running micro tasks after send input to the inspector.
+    cmd.cdp.browser.runMicrotasks();
 }
 
 pub const ExecutionContextCreated = struct {
@@ -75,7 +61,7 @@ pub const ExecutionContextCreated = struct {
     pub const AuxData = struct {
         isDefault: bool = true,
         type: []const u8 = "default",
-        frameId: []const u8 = cdp.FRAME_ID,
+        frameId: []const u8,
     };
 };
 
@@ -110,10 +96,10 @@ fn logInspector(cmd: anytype, action: anytype) !void {
         },
         else => return,
     };
-    const id = cmd.id orelse return error.RequiredId;
+    const id = cmd.input.id orelse return error.RequiredId;
     const name = try std.fmt.allocPrint(cmd.arena, "id_{d}.js", .{id});
 
-    var dir = try std.fs.cwd().makeOpenPath("zig-cache/tmp", .{});
+    var dir = try std.fs.cwd().makeOpenPath(".zig-cache/tmp", .{});
     defer dir.close();
 
     const f = try dir.createFile(name, .{});
